@@ -10,19 +10,19 @@
 
 ## TL;DR
 
-- **Bản chất:** Thiết kế nửa đầu của bộ Slide thuyết trình chính thức (`67_Slide.pptx` từ Slide 1 đến Slide 14).
-- **Mục đích:** Trực quan hóa kiến thức nền tảng (Lịch sử, Triết lý Code-first, WebSocket CDP, Auto-waiting, Browser Context) và bộ công cụ SDET (CLI, Codegen, UI Mode, Trace Viewer).
-- **Điểm mấu chốt:** Chuẩn đồ họa Widescreen 16:9, áp dụng quy tắc $6 \times 6$, triệt tiêu văn bản dài.
+- **Bản chất:** Đặc tả nhiệm vụ thiết kế nửa đầu của bộ Slide thuyết trình đồ án môn học (`67_Slide.pptx` từ Slide 1 đến Slide 14).
+- **Mục đích:** Trực quan hóa kiến thức nền tảng (Lịch sử, Triết lý Code-First, WebSocket CDP, Auto-waiting, Browser Context) và bộ công cụ SDET (CLI, Codegen, UI Mode, Trace Viewer).
+- **Điểm mấu chốt:** Thiết kế chuẩn Widescreen 16:9, áp dụng nguyên lý thiết kế thông tin trực quan (Information Design), loại bỏ hoàn toàn các đoạn văn bản dài.
 
-## Core Architectural Content to Implement
+---
 
-### 1. Cấu Trúc Khung Slide Chi Tiết (Slide 1 $\to$ 14)
+## 1. Mục Tiêu & Cấu Trúc Khung Slide Chi Tiết (Slide 1 $\to$ 14)
 
 ```text
 SLIDE DECK PHẦN 1: CƠ SỞ LÝ THUYẾT & BỘ CÔNG CỤ (Slide 1 -> 14)
 ├── 1. MỞ ĐẦU & GIỚI THIỆU (Slide 1 - 3)
 │   ├── Slide 1: Trang bìa đề tài (Logo Cao Thắng, Khoa CNTT, Đề tài C, GVHD ThS. Nguyễn Hoàng Việt, Nhóm 67)
-│   ├── Slide 2: Danh sách 7 thành viên & Bảng phân công nhiệm vụ (MSSV, Tỷ lệ đóng góp SSOT)
+│   ├── Slide 2: Danh sách 7 thành viên & Bảng phân công nhiệm vụ (MSSV, Tỷ lệ đóng góp chuẩn SSOT)
 │   └── Slide 3: Mục lục thuyết trình (Agenda 5 phần)
 ├── 2. CƠ SỞ LÝ THUYẾT & KIẾN TRÚC CỐT LÕI (Slide 4 - 10)
 │   ├── Slide 4: Tổng quan Playwright & Lịch sử phát triển (Microsoft, Apache 2.0)
@@ -39,21 +39,40 @@ SLIDE DECK PHẦN 1: CƠ SỞ LÝ THUYẾT & BỘ CÔNG CỤ (Slide 1 -> 14)
     └── Slide 14: Demo công cụ Playwright Trace Viewer (4 luồng dữ liệu khám nghiệm sự cố)
 ```
 
-### 2. Tiêu Chuẩn Trực Quan Hóa Kỹ Thuật (Visual Standards)
+---
 
-1. **Quy tắc thiết kế $6 \times 6$:** Mỗi slide tối đa 6 dòng, mỗi dòng tối đa 6 từ khóa quan trọng.
-2. **Bảng màu chủ đạo:** Xanh Navy (`#0F2027` / `#203A43`), Nền sáng (`#FFFFFF` / `#F8F9FA`), Điểm nhấn xanh lá (Pass) và đỏ (Fail).
-3. **Hình ảnh & Sơ đồ:** Sơ đồ vector sắc nét hoặc ảnh chụp màn hình Full HD ($1920 \times 1080$).
+## 2. Quy Chuẩn Trực Quan Hóa Kỹ Thuật (Visual & Presentation Standards)
+
+1. **Quy tắc thiết kế $6 \times 6$:** Mỗi slide tối đa 6 dòng nội dung, mỗi dòng tối đa 6 từ khóa quan trọng; nhấn mạnh vào sơ đồ và từ khóa kỹ thuật.
+2. **Bảng màu chủ đạo (Color Palette):**
+   - Nền sáng / Đậm chất học thuật: Nền trắng (`#FFFFFF`) hoặc xám nhạt (`#F8F9FA`).
+   - Màu chủ đạo: Xanh Navy (`#0F2027` / `#203A43`).
+   - Màu nhấn kỹ thuật: Xanh lục cho trạng thái Pass / Thành công, Đỏ cho Fail / Lỗi.
+3. **Typography & Tỷ lệ hiển thị:**
+   - Tỷ lệ khung hình chuẩn Widescreen $16:9$.
+   - Phông chữ không chân hiện đại (`Arial`, `Segoe UI`, `Roboto`, hoặc `Inter`).
+   - Kích thước chữ: Tiêu đề $\ge 32\text{pt}$, Nội dung gạch đầu dòng $\ge 18\text{pt}$.
+4. **Sơ đồ kiến trúc & Hình ảnh:**
+   - Sử dụng sơ đồ vector hoặc hình ảnh chất lượng Full HD ($1920 \times 1080$), không dùng ảnh chụp mờ hoặc vỡ pixel.
 
 ---
 
-## Acceptance Criteria & Definition of Done (DoD Checklist)
+## 3. Tài Liệu Nghiên Cứu Bắt Buộc (Primary Official Sources)
+
+1. **Chuẩn Thiết Kế Slide & Trực Quan Hóa Thông Tin:**
+   - [Microsoft PowerPoint Official Presentation Best Practices](https://support.microsoft.com/en-us/office/tips-for-creating-and-delivering-an-effective-presentation-f43156b0-20d2-4c51-ac34-52560e6e4437)
+   - [Edward Tufte - The Visual Display of Quantitative Information](https://www.edwardtufte.com/tufte/books_vdqi)
+2. **Tài Liệu Kiến Trúc Playwright:**
+   - [Playwright Architectural Overview Documentation](https://playwright.dev/docs/why-playwright)
+
+---
+
+## 4. Tiêu Chí Nghiệm Thu & Bằng Chứng Bàn Giao (Definition of Done)
 
 - [ ] **Hoàn Tất Slide 1 $\to$ 14:**
   - [ ] Đầy đủ 14 slides theo đúng cấu trúc khung ở Mục 1.
   - [ ] Slide bìa có đầy đủ Logo Trường Cao đẳng Kỹ thuật Cao Thắng và thông tin nhóm 67.
-- [ ] **Định Dạng & Đồng Bộ:**
-  - [ ] Khung hình chuẩn Widescreen $16:9$.
-  - [ ] Phông chữ đồng bộ (Arial, Segoe UI, Roboto), tiêu đề $\ge 32\text{pt}$, nội dung $\ge 18\text{pt}$.
-- [ ] **Bàn Giao & Hợp Nhất:**
-  - [ ] Ghép nối với Slide 15 $\to$ 26 của WBS 4.2B thành file `67_Slide.pptx` hoàn chỉnh để Trưởng nhóm nghiệm thu.
+- [ ] **Định Dạng Chuẩn Widescreen 16:9:**
+  - [ ] Khung hình chuẩn Widescreen $16:9$, màu sắc đồng bộ, không lỗi chính tả.
+- [ ] **Ghép Nối & Bàn Giao:**
+  - [ ] Ghép nối với Slide 15 $\to$ 26 (WBS 4.2B) thành file `67_Slide.pptx` và xuất `67_Slide.pdf` hoàn chỉnh nộp cho Trưởng nhóm.
