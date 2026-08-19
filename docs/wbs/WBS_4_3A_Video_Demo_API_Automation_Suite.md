@@ -4,8 +4,8 @@
 
 - **WBS Code:** `4.3A`
 - **Task Name:** Sản xuất Video Clip Thuyết minh & Demo Bộ Test API (Thời lượng: 5 - 8 Phút)
-- **Assignee:** Lê Minh Tài (MSSV: 0306241145)
-- **Task Weight:** `3.0%`
+- **Assignee:** Ngô Gia Bảo (MSSV: 0306241090)
+- **Task Weight:** `3.5%`
 - **Deliverable Artifacts:** File video demo `67_Demo_API.mp4` (Full HD 1080p), đường link video YouTube trong file `67_Demo.txt`.
 
 ## TL;DR

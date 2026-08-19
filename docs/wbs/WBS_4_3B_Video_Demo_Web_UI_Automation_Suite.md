@@ -4,8 +4,8 @@
 
 - **WBS Code:** `4.3B`
 - **Task Name:** Sản xuất Video Clip Thuyết minh & Demo Bộ Test Web UI (Thời lượng: 6 - 9 Phút)
-- **Assignee:** Ngô Gia Bảo (MSSV: 0306241090)
-- **Task Weight:** `3.0%`
+- **Assignee:** Lê Minh Quân (MSSV: 0306241143)
+- **Task Weight:** `3.5%`
 - **Deliverable Artifacts:** File video demo `67_Demo_UI.mp4` (Full HD 1080p), đường link video YouTube trong file `67_Demo.txt`.
 
 ## TL;DR
