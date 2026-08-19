@@ -3,69 +3,76 @@
 ## Metadata
 
 - **WBS Code:** `1.4B`
-- **Task Name:** Phân tích Năng lực API (APIRequestContext, Hybrid Auth, SOM)
+- **Task Name:** Nghiên cứu Năng lực API (APIRequestContext, Hybrid Auth, SOM, RFC 9457)
 - **Assignee:** Nguyễn Hoài Linh (MSSV: 0306241126)
 - **Task Weight:** `2.5%`
-- **Deliverable Artifacts:** Mục 2.4 Chương 2 trong `67_Bao_cao.docx` và các Slide tương ứng trong `67_Slide.pptx`.
+- **Deliverable Artifacts:** Mục 2.4 Chương 2 trong `67_Bao_cao.docx`.
 
 ## TL;DR
 
-- **Bản chất:** Năng lực tự động hóa kiểm thử API của Playwright với engine HTTP độc lập `APIRequestContext`.
-- **Mục đích:** Xây dựng khung kiến trúc cho toàn bộ bộ kiểm thử API của đồ án (Phase 2).
-- **Điểm mấu chốt:** Xác thực lai (Hybrid Auth), Service Object Model (SOM), và kiểm định hợp đồng RFC 9457 với Zod.
-
-## Core Architectural Content to Document
-
-### 1. Đối Tượng `APIRequestContext` (Headless HTTP Engine)
-
-```typescript
-// Thuc thi HTTP Request doc lap khong can mo Browser
-import { test, expect } from "@playwright/test";
-
-test("API Health Check", async ({ request }) => {
-  const response = await request.get("/api/health");
-  expect(response.status()).toBe(200);
-  const data = await response.json();
-  expect(data.status).toBe("ok");
-});
-```
-
-- **Tốc độ thực thi micro-giây:** Gọi trực tiếp qua socket, không tốn tài nguyên render Chromium hay DOM.
-- **Tự động quản lý phiên:** Duy trì Cookie Jar, kế thừa `baseURL` và `extraHTTPHeaders` từ `playwright.config.ts`.
-
-### 2. Kỹ Thuật Xác Thực Lai (Hybrid Auth & Storage State Injection)
-
-```text
-+-----------------------+
-|  POST /api/v1/auth    | ----> Nhận JWT / Cookie trong 30ms ----> Lưu file storageState.json
-+-----------------------+                                                    |
-                                                                             v
-+-----------------------+                                    +-------------------------------+
-|  UI Test 1: Checkout  | <--------------------------------- | Nạp trực tiếp vào Context RAM |
-+-----------------------+     (Trạng thái đã đăng nhập sẵn)  +-------------------------------+
-```
-
-- **Bản chất:** Bỏ qua các bước gõ phím đăng nhập trên UI ($3\text{s} - 5\text{s}$), gửi 1 HTTP Request trực tiếp lấy Token ($30\text{ms}$).
-- **Hiệu quả:** Rút ngắn $> 80\%$ tổng thời gian chạy E2E suite.
-
-### 3. Mô Hình Service Object Model (SOM) & Request Chaining
-
-- **Service Object Model (SOM):** Đóng gói endpoints nghiệp vụ vào các class (`AuthService`, `BookingService`).
-- **Request Chaining:** Chuyền dữ liệu đầu ra của API trước làm tham số đầu vào cho API kế tiếp:
-  $$\text{Login API} \xrightarrow{\text{Token}} \text{Hold Seat API} \xrightarrow{\text{SeatID}} \text{Payment API} \xrightarrow{\text{BookingID}} \text{Get Ticket API}$$
-
-### 4. Kiểm Định Hợp Đồng Chuẩn Hóa Lỗi (RFC 9457 & Zod Schema Validation)
-
-- **Chống Contract Drift:** Backend đổi schema response lỗi $\to$ Zod bắt lỗi ngay lập tức tại ranh giới test.
-- **Schema RFC 9457:** Kiểm định `type`, `title`, `status`, `detail`, `instance`.
+- **Bản chất:** Đặc tả nhiệm vụ nghiên cứu năng lực tự động hóa kiểm thử API của Playwright thông qua đối tượng `APIRequestContext`, kỹ thuật xác thực lai (Hybrid Auth), mô hình Service Object Model (SOM), và chuẩn hóa dữ liệu lỗi RFC 9457 với Zod.
+- **Mục đích:** Cung cấp câu hỏi định hướng và tài liệu chính thống để người phụ trách thiết lập chuẩn mực kiến trúc cho toàn bộ bộ kiểm thử API của đồ án (Phase 2).
+- **Điểm mấu chốt:** Nắm vững tốc độ thực thi micro-giây, cơ chế quản lý Cookie Jar tự động và kỹ thuật chống Contract Drift bằng Zod Schema.
 
 ---
 
-## Acceptance Criteria & Definition of Done (DoD Checklist)
+## 1. Mục Tiêu & Phạm Vi Nghiên Cứu (Research Scope)
 
-- [ ] **Báo cáo Word (`67_Bao_cao.docx`):**
-  - [ ] Hoàn thành Mục 2.4 Chương 2: Phân tích `APIRequestContext`, kỹ thuật Hybrid Auth, mô hình SOM và chuẩn RFC 9457.
-  - [ ] Đính kèm sơ đồ luồng dữ liệu Hybrid Auth và code mẫu Zod Schema.
-  - [ ] Phân tích ưu thế của việc tích hợp kiểm thử API trực tiếp trong Playwright so với thư viện ngoài (Axios/RestAssured).
-- [ ] **Review & Bàn Giao:**
-  - [ ] Nộp bản thảo Word cho Trưởng nhóm nghiệm thu đúng hạn.
+- **Phạm vi trọng tâm:**
+  - Engine HTTP độc lập: Đối tượng `APIRequestContext` trong Playwright, khả năng thực thi HTTP request trực tiếp qua socket mà không cần khởi tạo trình duyệt đồ họa.
+  - Kỹ thuật Xác thực lai (Hybrid Authentication): Đăng nhập qua API lấy JWT Token ($30\text{ms}$) $\to$ Lưu `storageState` $\to$ Nạp thẳng vào `BrowserContext` của Web UI để bỏ qua bước gõ phím đăng nhập trên UI ($3\text{s} - 5\text{s}$).
+  - Mô hình Service Object Model (SOM) & Request Chaining: Đóng gói API endpoints theo nghiệp vụ và chuyền dữ liệu giữa các API liên tiếp.
+  - Kiểm định hợp đồng dữ liệu lỗi quốc tế: Chuẩn RFC 9457 (Problem Details for HTTP APIs - `application/problem+json`) kết hợp với thư viện xác thực Schema Zod.
+- **Ranh giới ngoài phạm vi (Non-goals):** Không trực tiếp viết mã 4 ca test API cụ thể (đã phân bổ tại Phase 2).
+
+---
+
+## 2. Các Câu Hỏi Cốt Lõi Cần Trả Lời (Core Guiding Questions)
+
+Người phụ trách cần nghiên cứu tài liệu chính thống để trả lời các câu hỏi sau:
+
+1. **Về Đối Tượng `APIRequestContext`:**
+   - Tại sao việc kiểm thử API trực tiếp bằng Playwright `request` lại vượt trội hơn việc dùng thư viện ngoài (như Axios, Supertest, Postman) khi tích hợp trong cùng một dự án E2E?
+   - `APIRequestContext` quản lý `baseURL`, `extraHTTPHeaders` và Cookie Jar tự động giữa các request như thế nào?
+2. **Về Kỹ Thuật Xác Thực Lai (Hybrid Authentication):**
+   - Bản chất của Hybrid Auth là gì? Tại sao việc kết hợp kiểm thử API (để setup dữ liệu và xác thực) với kiểm thử Web UI (để test trải nghiệm người dùng) giúp giảm $> 80\%$ tổng thời gian chạy của test suite?
+3. **Về Mô Hình Service Object Model (SOM) & Request Chaining:**
+   - Mô hình Service Object Model (SOM) áp dụng nguyên lý tách biệt trách nhiệm (Separation of Concerns) trong API testing như thế nào?
+   - Request Chaining (Chuyền Token $\to$ SeatID $\to$ BookingID $\to$ Ticket) được tổ chức ra sao để đảm bảo tính nguyên tử của kịch bản kiểm thử?
+4. **Về Chuẩn Hóa Lỗi RFC 9457 & Zod Schema:**
+   - Cấu trúc chuẩn của một HTTP Error Response theo chuẩn quốc tế RFC 9457 (`type`, `title`, `status`, `detail`, `instance`) gồm những trường bắt buộc nào?
+   - Tại sao kiểm thử API bắt buộc phải có bước kiểm định Schema (Zod Schema Validation) thay vì chỉ kiểm tra HTTP Status Code `200` hay `400`? Vấn đề "Contract Drift" xảy ra khi nào?
+
+---
+
+## 3. Tài Liệu Nghiên Cứu Bắt Buộc (Primary Official Sources)
+
+Người phụ trách bắt buộc phải đọc và trích dẫn từ các nguồn chuẩn quốc tế sau:
+
+1. **Tài Liệu Chính Thống Playwright:**
+   - [Playwright API Testing Official Guide](https://playwright.dev/docs/api-testing)
+   - [Playwright APIRequestContext API Reference](https://playwright.dev/docs/api/class-apirequestcontext)
+2. **Chuẩn Giao Thức & Thư Viện Schema:**
+   - [IETF RFC 9457 - Problem Details for HTTP APIs](https://datatracker.ietf.org/doc/html/rfc9457)
+   - [Zod TypeScript-First Schema Validation Documentation](https://zod.dev/)
+
+---
+
+## 4. Cấu Trúc Báo Cáo & Yêu Cầu Đầu Ra (Required Deliverables)
+
+### Báo Cáo Word (`67_Bao_cao.docx` - Mục 2.4 Chương 2)
+- **2.4.1. Năng lực kiểm thử API với `APIRequestContext`:** Phân tích cơ chế headless HTTP engine, tốc độ thực thi và cấu hình tập trung.
+- **2.4.2. Kỹ thuật Xác thực lai (Hybrid Auth):**
+  - Trình bày sơ đồ luồng dữ liệu Hybrid Auth giữa API và UI.
+  - Phân tích định lượng thời gian tiết kiệm được.
+- **2.4.3. Mô hình Service Object Model (SOM) & Request Chaining:** Cấu trúc tổ chức class dịch vụ và luồng chuyền dữ liệu.
+- **2.4.4. Kiểm định hợp đồng dữ liệu chuẩn RFC 9457:** Giải thích cấu trúc 5 trường chuẩn của RFC 9457 và vai trò của Zod trong việc chống Contract Drift.
+
+---
+
+## 5. Tiêu Chí Đánh Giá & Nghiệm Thu (Evaluation Rubric & DoD)
+
+- [ ] **Khả Năng Phản Biện:** Giải thích rõ ràng nguyên lý Hybrid Auth, cấu trúc RFC 9457 và cơ chế hoạt động của Zod khi được chất vấn.
+- [ ] **Chất Lượng Học Thuật:**
+  - [ ] Sơ đồ luồng dữ liệu Hybrid Auth tự vẽ rõ ràng, thể hiện chính xác mối quan hệ giữa API Token và Browser Context.
+  - [ ] Dẫn nguồn đúng đặc tả IETF RFC 9457 theo chuẩn IEEE.
