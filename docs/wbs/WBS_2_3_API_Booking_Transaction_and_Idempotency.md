@@ -10,50 +10,86 @@
 
 ## TL;DR
 
-- **Bản chất:** Đặc tả nhiệm vụ hiện thực bộ kiểm thử tự động API Ca 3: Giao dịch thanh toán đặt vé và xác thực tính bất biến Idempotency thông qua tiêu đề `Idempotency-Key` (UUID v4).
-- **Mục đích:** Đảm bảo hệ thống xử lý an toàn khi người dùng nhấp đúp (Double Click) hoặc khi mạng chập chờn kích hoạt cơ chế tự động gửi lại (Client Retry).
-- **Điểm mấu chốt:** Kiểm chứng bất biến tuyệt đối: Không trừ tiền hai lần, không tạo bản ghi giao dịch rác và trả về cùng một phản hồi nghiệp vụ ban đầu.
+- **Bản chất:** Đặc tả nhiệm vụ hiện thực bộ kiểm thử tự động API Ca 3: Giao dịch xác nhận thanh toán đặt vé và xác thực tính bất biến Idempotency thông qua tiêu đề `idempotency-key` (UUID v4) trên các endpoint `POST /bookings/reserve` và `POST /bookings/confirm` của hệ thống `ticket-booking`.
+- **Mục đích:** Đảm bảo hệ thống xử lý an toàn tuyệt đối khi người dùng nhấp đúp (Double Click) nút thanh toán hoặc khi mạng chập chờn kích hoạt cơ chế tự động gửi lại (Client Retry).
+- **Điểm mấu chốt:** Kiểm chứng cơ chế lưu bộ nhớ đệm kết quả Idempotency trong Redis (`idempotency:booking:${userId}:${key}`), đảm bảo không trừ tiền hai lần, không tạo bản ghi thanh toán thừa và trả về cùng một kết quả ban đầu.
 
 ---
 
 ## 1. Mục Tiêu & Bối Cảnh Nghiệp Vụ (Business & Technical Context)
 
-- **Bối cảnh hệ thống:**
-  - Trong các giao dịch thanh toán trực tuyến, tình huống mất gói tin (Network Timeout / Packet Loss) xảy ra thường xuyên: Client đã gửi request trừ tiền nhưng chưa nhận được response từ máy chủ $\to$ Client tự động gửi lại request lần 2.
-  - Nếu API không có tính chất **Idempotency** ($f(f(x)) = f(x)$), tài khoản khách hàng sẽ bị trừ tiền 2 lần cho cùng một chiếc vé.
-  - Backend `ticket-booking` triển khai tiêu đề chuẩn `Idempotency-Key` (chuỗi UUID v4):
-    - Request đầu tiên kèm Key $K_1$: Backend thực thi tạo giao dịch, lưu kết quả phản hồi vào bộ nhớ đệm Cache/Redis cùng mã băm (Hash) của Payload.
-    - Request thứ hai gửi lại với cùng Key $K_1$ và Payload y hệt: Backend phát hiện trùng Key, lập tức trả về kết quả đã lưu trong Cache mà **hoàn toàn không thực thi lại logic trừ tiền hay ghi thêm bản ghi vào Database**.
+- **Bối cảnh hệ thống `ticket-booking` (NestJS Booking & Payment Module):**
+  - **Endpoints Trọng Yếu:**
+    1. `POST /bookings/reserve`: Đặt giữ chỗ ghế tạm thời (bắt buộc kèm header `idempotency-key`).
+    2. `POST /bookings/confirm`: Xác nhận thanh toán và xuất vé chính thức (bắt buộc kèm header `idempotency-key`).
+  - **Cấu Trúc Header & Payload Xác Nhận Đơn Hàng (`ConfirmBookingDto`):**
+    - Header bắt buộc: `Authorization: Bearer <token>`, `idempotency-key: <UUIDv4>`.
+    - Body:
+      ```json
+      {
+        "bookingId": "019fa8bc-8f4d-7000-b366-e691f45cfb8f",
+        "orderCode": 123456,
+        "paymentMethod": "payos",
+        "transactionId": "PAYOS-TX-987654",
+        "amount": 100000
+      }
+      ```
+  - **Cơ Chế Xử Lý Idempotency với Redis Cache:**
+    - Khi nhận request kèm header `idempotency-key: K_1`:
+      1. Backend kiểm tra trong Redis với khóa `idempotency:booking:${userId}:${K_1}`.
+      2. Nếu tìm thấy dữ liệu trong Cache: Backend trả về ngay lập tức JSON response đã lưu trước đó mà **hoàn toàn không thực thi lại logic trừ tiền, không ghi thêm bản ghi vào bảng `payments`, và không sinh thêm vé mới trong bảng `tickets`**.
+      3. Nếu chưa có: Backend mở Transaction thực hiện ghi nhận thanh toán, xuất vé, lưu kết quả phản hồi vào Redis với thời hạn TTL 24 giờ (`24h`), rồi trả về kết quả `HTTP 200 OK` cho Client.
+    - Nếu request gửi lên thiếu header `idempotency-key`: Backend ném lỗi `BadRequestException` (`HTTP 400 Bad Request`) với thông báo: *"Idempotency key is required"*.
 
 ---
 
 ## 2. Các Yêu Cầu Thiết Kế Ca Kiểm Thử (Test Design Specifications)
 
-Người phụ trách cần thiết kế và hiện thực 4 kịch bản kiểm thử tự động trong file `tests/api/booking.spec.ts`:
+Người phụ trách cần thiết kế và hiện thực tối thiểu 4 kịch bản kiểm thử tự động trong `tests/api/booking.spec.ts`:
 
-1. **`TC-IDEMP-01: First Execution (Happy Path Booking Creation)`**
-   - **Thao tác:** Sinh ngẫu nhiên một chuỗi UUID v4 làm `Idempotency-Key`, gửi request `POST /api/v1/bookings` với payload hợp lệ.
-   - **Kỳ vọng:** Phản hồi HTTP `201 Created`, trả về `bookingId` mới và cơ sở dữ liệu tăng đúng 1 bản ghi.
-2. **`TC-IDEMP-02: Duplicate Request with Identical Key & Payload`**
-   - **Thao tác:** Gửi lại chính xác request trên với cùng `Idempotency-Key` và cùng nội dung payload.
-   - **Kỳ vọng & Bất biến (Invariants):**
-     - Phản hồi HTTP `200 OK` hoặc `201 Created`.
-     - Mã `bookingId`, trạng thái đơn hàng và dữ liệu trả về giống hệt lần 1.
-     - Số lượng bản ghi trong Database **không thay đổi** (không sinh ra booking thừa).
-3. **`TC-IDEMP-03: Key Conflict with Mutated Payload (Tampered Body)`**
-   - **Mục tiêu:** Kiểm tra cơ chế chống gian lận khi kẻ xấu dùng lại `Idempotency-Key` cũ nhưng thay đổi dữ liệu đặt vé (khác ghế, khác số tiền).
-   - **Kỳ vọng:** Backend phát hiện mismatch payload hash, từ chối với HTTP `422 Unprocessable Entity` hoặc HTTP `400 Bad Request`.
-4. **`TC-IDEMP-04: Concurrent Race on Same Idempotency Key`**
-   - **Thao tác:** Bắn đồng thời 5 requests với cùng 1 `Idempotency-Key` qua `Promise.all()`.
-   - **Kỳ vọng:** Duy nhất 1 giao dịch được tạo ra trong DB và 5 phản hồi trả về cùng một mã `bookingId`.
+### `TC-IDEMP-01: First Execution (Happy Path Booking Confirmation)`
+- **Thao tác:**
+  1. Giữ chỗ ghế thành công nhận `bookingId`.
+  2. Sinh một chuỗi UUID v4 ngẫu nhiên làm `idempotency-key: K_1`.
+  3. Gửi request `POST /bookings/confirm` kèm header `idempotency-key: K_1` và payload hợp lệ.
+- **Kỳ vọng & Invariants:**
+  - Mã trạng thái: `HTTP 200 OK`.
+  - Cấu trúc response: `{ success: true, data: { bookingId, paymentId, transactionId, status: "confirmed", confirmedAt, totalPrice, tickets } }`.
+  - Trạng thái đơn hàng chuyển thành `confirmed`, danh sách `tickets` sinh ra mã vé chính thức (`ticketCode`).
+
+---
+
+### `TC-IDEMP-02: Duplicate Request with Identical Idempotency Key (Network Retry Simulation)`
+- **Thao tác:** Gửi lại chính xác request xác nhận thanh toán trên với cùng `idempotency-key: K_1` và cùng nội dung body.
+- **Kỳ vọng & Bất biến toán học (Mathematical Invariants):**
+  - Mã trạng thái: `HTTP 200 OK`.
+  - Dữ liệu `paymentId`, `transactionId`, `bookingId`, `confirmedAt` và danh sách `tickets` trả về giống hệt $100\%$ so với lần 1.
+  - **Bất biến cơ sở dữ liệu:** Số lượng bản ghi trong bảng `payments` và `tickets` không thay đổi (không sinh ra payment trùng lặp).
+
+---
+
+### `TC-IDEMP-03: Missing Mandatory Idempotency Key Header Validation`
+- **Thao tác:** Gửi request `POST /bookings/confirm` hoặc `POST /bookings/reserve` nhưng **cố tình không truyền header `idempotency-key`**.
+- **Kỳ vọng:**
+  - Mã trạng thái: `HTTP 400 Bad Request`.
+  - Header `content-type` là `application/problem+json`.
+  - Response body chứa `status: 400`, `title: "Bad Request"`, `detail: "Idempotency key is required"`.
+
+---
+
+### `TC-IDEMP-04: Concurrent Sockets Flooding on Same Idempotency Key (Double Click Attack)`
+- **Thao tác:** Bắn đồng thời 5 requests `POST /bookings/confirm` mang cùng 1 `idempotency-key: K_1` thông qua `Promise.all()`.
+- **Kỳ vọng:**
+  - Cả 5 requests đều nhận mã trạng thái `HTTP 200 OK` và trả về cùng một mã `paymentId`.
+  - Duy nhất 1 giao dịch thanh toán được ghi nhận trong cơ sở dữ liệu.
 
 ---
 
 ## 3. Câu Hỏi Cốt Lõi Cần Trả Lời & Kịch Bản Thất Bại (Failure Modes)
 
-- Tại sao phương thức `POST` trong chuẩn HTTP vốn dĩ là Non-idempotent và cần phải bổ sung tiêu đề `Idempotency-Key`?
-- Backend làm thế nào để phân biệt giữa "Gửi lại request hợp lệ do mạng lag" và "Cố tình dùng lại key cũ để thực hiện giao dịch khác"?
-- Nếu Redis lưu trữ Idempotency Key bị crash giữa chừng, chiến lược bảo vệ Fallback trong Transaction Database (PostgreSQL Unique Constraint) là gì?
+1. **Tại sao các thao tác thanh toán tài chính bắt buộc phải dùng tiêu đề `Idempotency-Key` dạng UUID v4 thay vì để Backend tự sinh mã?**
+2. **Nếu Redis bị sự cố (Crash / Network Partition), làm thế nào cơ sở dữ liệu PostgreSQL (Unique Constraint trên `orderCode` / `transactionId`) bảo vệ hệ thống không bị trừ tiền 2 lần?**
+3. **Chiến lược Fail-Open trong việc đọc Idempotency Cache của `BookingService` giúp duy trì tính sẵn sàng (Availability) của hệ thống ra sao?**
 
 ---
 
@@ -63,8 +99,7 @@ Người phụ trách cần thiết kế và hiện thực 4 kịch bản kiểm
    - [IETF Internet-Draft - The Idempotency-Key HTTP Header Field](https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header)
    - [Stripe Engineering Documentation - Designing Robust Idempotent APIs](https://stripe.com/docs/api/idempotent_requests)
 2. **Tài Liệu Playwright API Testing:**
-   - [Playwright API Testing Guide](https://playwright.dev/docs/api-testing)
-   - [Playwright Test Fixtures Architecture](https://playwright.dev/docs/test-fixtures)
+   - [Playwright API Testing Official Guide](https://playwright.dev/docs/api-testing)
 
 ---
 
@@ -72,11 +107,11 @@ Người phụ trách cần thiết kế và hiện thực 4 kịch bản kiểm
 
 ### Báo Cáo (`67_Bao_cao.docx` / `67_Bao_cao.tex` - Mục 3.2.3 Chương 3)
 Người phụ trách soạn thảo theo khung 5 phần học thuật:
-1. **Mục tiêu & Cơ chế kỹ thuật:** Phân tích định nghĩa toán học của Idempotency và cơ chế hoạt động của header `Idempotency-Key`.
-2. **Đặc tả kịch bản & Dữ liệu kiểm thử:** Bảng thông số 4 ca test (`TC-IDEMP-01` $\to$ `TC-IDEMP-04`).
-3. **Trích đoạn mã nguồn then chốt:** Trích dẫn 15 - 25 dòng code khởi tạo UUID v4 và kiểm định tính bất biến dữ liệu.
-4. **Bằng chứng thực nghiệm & Phân tích log:** Ảnh chụp màn hình terminal chạy pass $100\%$, log so sánh 2 phản hồi trùng lặp.
-5. **Đánh giá rủi ro & Bài học kỹ thuật:** Phân tích rủi ro tài chính khi khách hàng bị trừ tiền trùng lặp.
+1. **Mục tiêu & Cơ chế kỹ thuật:** Phân tích nguyên lý toán học của tính Idempotency ($f(f(x)) = f(x)$) và cơ chế lưu cache Redis `idempotency:booking:${userId}:${key}`.
+2. **Đặc tả kịch bản & Dữ liệu kiểm thử:** Bảng thông số 4 ca test (`TC-IDEMP-01` $\to$ `TC-IDEMP-04`) với các endpoints `/bookings/reserve`, `/bookings/confirm`.
+3. **Trích đoạn mã nguồn then chốt:** Trích dẫn 15 - 25 dòng code khởi tạo UUID v4 header và kiểm tra tính bất biến của dữ liệu thanh toán.
+4. **Bằng chứng thực nghiệm & Phân tích log:** Ảnh chụp terminal chạy pass $100\%$, log JSON so sánh 2 phản hồi trùng lặp khớp nhau từng trường.
+5. **Đánh giá rủi ro & Bài học kỹ thuật:** Phân tích rủi ro tài chính của hiện tượng Double-Charge và giải pháp kết hợp Redis Cache + DB Unique Constraints.
 
 ---
 
@@ -85,7 +120,7 @@ Người phụ trách soạn thảo theo khung 5 phần học thuật:
 - [ ] **Mã Nguồn Kiểm Thử & Chạy Pass ($100\%$):**
   - [ ] Tạo file `tests/api/booking.spec.ts`.
   - [ ] Chạy lệnh `bunx playwright test tests/api/booking.spec.ts --project=api` pass $100\%$ cả 4 kịch bản.
-  - [ ] Xác nhận không có hiện tượng duplicate record trong database khi chạy lặp lại.
+  - [ ] Đảm bảo sinh đúng mã UUID v4 cho header `idempotency-key`.
 - [ ] **Bằng Chứng Git & Pull Request:**
   - [ ] Tạo nhánh `feat/wbs-2.3-api-booking-idempotency`.
   - [ ] Tạo Pull Request trên GitHub với mô tả chi tiết, log JSON và ảnh test pass.
