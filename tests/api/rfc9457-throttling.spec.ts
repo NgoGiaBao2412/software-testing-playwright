@@ -43,10 +43,10 @@ test.describe("WBS 2.4: RFC 9457 Problem Details & Rate Limiting Throttler", () 
     let lastResponse;
 
     // Bắn liên tiếp các request sai thông tin để kích hoạt Throttler Guard
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 10; i++) {
       lastResponse = await request.post("/auth/login", {
         data: {
-          email: "brute_force_test@example.com",
+          email: `brute_force_${i}@example.com`,
           password: "wrong_password",
         },
       });

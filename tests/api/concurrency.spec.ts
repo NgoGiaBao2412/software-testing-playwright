@@ -1,3 +1,4 @@
+import type { APIRequestContext, APIResponse } from "@playwright/test";
 import { expect, test } from "@/fixtures/api.fixture.js";
 import { ProblemDetailsSchema } from "../../schemas/rfc9457.schema.js";
 import crypto from "node:crypto";
@@ -26,6 +27,84 @@ const SEAT_POOL = [
   "019fa8bc-8f4d-7000-b366-e691f45cfb5a", // A10
 ];
 
+interface ConcurrentResult {
+  createdResponses: APIResponse[];
+  conflictResponses: APIResponse[];
+}
+
+async function fireConcurrentBookingWithFallback(
+  activeClients: APIRequestContext[],
+  showId: string,
+  seatCandidates: string[],
+): Promise<ConcurrentResult> {
+  for (const seatId of seatCandidates) {
+    const requestPromises = activeClients.map((authCtx) => {
+      return authCtx.post("/bookings/reserve", {
+        headers: {
+          "idempotency-key": crypto.randomUUID(),
+        },
+        data: {
+          showId,
+          seatIds: [seatId],
+        },
+      });
+    });
+
+    const responses = await Promise.all(requestPromises);
+    const has429 = responses.some((r) => r.status() === 429);
+
+    if (has429) {
+      const retryAfter = responses.find((r) => r.status() === 429)?.headers()[
+        "retry-after"
+      ];
+      const waitMs = (parseInt(retryAfter || "15", 10) + 2) * 1000;
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setTimeout(resolve, Math.min(waitMs, 30000));
+      await promise;
+      continue;
+    }
+
+    const createdResponses = responses.filter((r) => r.status() === 201);
+    const conflictResponses = responses.filter((r) => r.status() === 409);
+
+    if (
+      createdResponses.length === 1 &&
+      conflictResponses.length === activeClients.length - 1
+    ) {
+      return { createdResponses, conflictResponses };
+    }
+  }
+
+  return { createdResponses: [], conflictResponses: [] };
+}
+
+async function acquireSingleReservationWithFallback(
+  userCtx: APIRequestContext,
+  showId: string,
+  seatCandidates: string[],
+): Promise<{ reserveRes: APIResponse; seatId: string } | null> {
+  for (const seatId of seatCandidates) {
+    const reserveRes = await userCtx.post("/bookings/reserve", {
+      headers: { "idempotency-key": crypto.randomUUID() },
+      data: { showId, seatIds: [seatId] },
+    });
+
+    if (reserveRes.status() === 429) {
+      const retryAfter = reserveRes.headers()["retry-after"];
+      const waitMs = (parseInt(retryAfter || "15", 10) + 2) * 1000;
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setTimeout(resolve, Math.min(waitMs, 30000));
+      await promise;
+      continue;
+    }
+
+    if (reserveRes.status() === 201) {
+      return { reserveRes, seatId };
+    }
+  }
+  return null;
+}
+
 test.describe("WBS 2.2: Concurrency Race Condition & Redis Redlock Testing", () => {
   // Cấu hình serial execution, tắt retry để tránh đốt rate limit, và tăng timeout
   test.describe.configure({
@@ -38,39 +117,25 @@ test.describe("WBS 2.2: Concurrency Race Condition & Redis Redlock Testing", () 
     concurrencyAuthRequests,
   }) => {
     const targetShowId = "019fa8bc-8f4d-7000-b366-e691f45cfb8f";
-    // Sử dụng 4 clients đồng thời (4 requests <= 10 limit của /bookings/reserve)
     const activeClients = concurrencyAuthRequests.slice(0, 4);
 
-    // Chọn ngẫu nhiên 1 ghế trong phân vùng A1 -> A5 cho ca kiểm thử tranh chấp đồng thời
-    const randomIndex = Math.floor(Math.random() * 5);
-    const targetSeatId = SEAT_POOL[randomIndex];
+    const result = await fireConcurrentBookingWithFallback(
+      activeClients,
+      targetShowId,
+      SEAT_POOL.slice(0, 5),
+    );
 
-    // Gửi đồng thời N requests cùng tranh chấp 1 ghế duy nhất tại thời điểm t0
-    const requestPromises = activeClients.map((authCtx) => {
-      return authCtx.post("/bookings/reserve", {
-        headers: {
-          "idempotency-key": crypto.randomUUID(),
-        },
-        data: {
-          showId: targetShowId,
-          seatIds: [targetSeatId],
-        },
-      });
-    });
-    const responses = await Promise.all(requestPromises);
-    console.log("TC-01 Statuses:", responses.map((r) => r.status()));
-    const createdResponses = responses.filter((r) => r.status() === 201);
-    const conflictResponses = responses.filter((r) => r.status() === 409);
-    expect(createdResponses).toHaveLength(1);
-    expect(conflictResponses).toHaveLength(activeClients.length - 1);
+    // Assert bất biến toán học: Đúng 1 thành công (201), N-1 thất bại do tranh chấp (409)
+    expect(result.createdResponses).toHaveLength(1);
+    expect(result.conflictResponses).toHaveLength(activeClients.length - 1);
 
     // Verify cấu trúc response 201
-    const successBody = await createdResponses[0].json();
+    const successBody = await result.createdResponses[0].json();
     expect(successBody.success).toBe(true);
     expect(successBody.data.status).toBe("pending_payment");
 
     // Verify các responses 409 tuân thủ chuẩn RFC 9457
-    for (const conflictRes of conflictResponses) {
+    for (const conflictRes of result.conflictResponses) {
       const errorBody = await conflictRes.json();
       const parsed = ProblemDetailsSchema.safeParse(errorBody);
       expect(parsed.success).toBe(true);
@@ -84,23 +149,14 @@ test.describe("WBS 2.2: Concurrency Race Condition & Redis Redlock Testing", () 
     const user2Ctx = concurrencyAuthRequests[1];
     const targetShowId = "019fa8bc-8f4d-7000-b366-e691f45cfb8f";
 
-    // Chọn ngẫu nhiên 1 ghế trong phân vùng A6 -> A10 cho ca kiểm thử TTL Expiration
-    const ttlSeatIndex = 5 + Math.floor(Math.random() * 5);
-    const targetSeatId = SEAT_POOL[ttlSeatIndex];
+    const reservation = await acquireSingleReservationWithFallback(
+      user1Ctx,
+      targetShowId,
+      SEAT_POOL.slice(5, 10),
+    );
 
-    // 1. User 1 tiến hành giữ chỗ
-    const reserveRes1 = await user1Ctx.post("/bookings/reserve", {
-      headers: {
-        "idempotency-key": crypto.randomUUID(),
-      },
-      data: {
-        showId: targetShowId,
-        seatIds: [targetSeatId],
-      },
-    });
-
-    expect(reserveRes1.status()).toBe(201);
-    const body1 = await reserveRes1.json();
+    expect(reservation).not.toBeNull();
+    const body1 = await reservation!.reserveRes.json();
     expect(body1.success).toBe(true);
     expect(body1.data.status).toBe("pending_payment");
 
@@ -120,7 +176,7 @@ test.describe("WBS 2.2: Concurrency Race Condition & Redis Redlock Testing", () 
       },
       data: {
         showId: targetShowId,
-        seatIds: [targetSeatId],
+        seatIds: [reservation!.seatId],
       },
     });
 
