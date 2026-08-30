@@ -77,32 +77,50 @@ async function fireConcurrentBookingWithFallback(
 
   return { createdResponses: [], conflictResponses: [] };
 }
-
 async function acquireSingleReservationWithFallback(
   userCtx: APIRequestContext,
   showId: string,
   seatCandidates: string[],
 ): Promise<{ reserveRes: APIResponse; seatId: string } | null> {
   for (const seatId of seatCandidates) {
-    const reserveRes = await userCtx.post("/bookings/reserve", {
-      headers: { "idempotency-key": crypto.randomUUID() },
-      data: { showId, seatIds: [seatId] },
-    });
-
-    if (reserveRes.status() === 429) {
-      const retryAfter = reserveRes.headers()["retry-after"];
-      const waitMs = (parseInt(retryAfter || "15", 10) + 2) * 1000;
-      const { promise, resolve } = Promise.withResolvers<void>();
-      setTimeout(resolve, Math.min(waitMs, 30000));
-      await promise;
-      continue;
-    }
+    const reserveRes = await sendReservationWith429Retry(
+      userCtx,
+      showId,
+      seatId,
+    );
 
     if (reserveRes.status() === 201) {
       return { reserveRes, seatId };
     }
   }
   return null;
+}
+
+async function sendReservationWith429Retry(
+  userCtx: APIRequestContext,
+  showId: string,
+  seatId: string,
+  maxAttempts = 3,
+): Promise<APIResponse> {
+  let res = await userCtx.post("/bookings/reserve", {
+    headers: { "idempotency-key": crypto.randomUUID() },
+    data: { showId, seatIds: [seatId] },
+  });
+
+  for (let i = 1; i < maxAttempts && res.status() === 429; i++) {
+    const retryAfter = res.headers()["retry-after"];
+    const waitMs = (parseInt(retryAfter || "15", 10) + 2) * 1000;
+    const { promise, resolve } = Promise.withResolvers<void>();
+    setTimeout(resolve, Math.min(waitMs, 30000));
+    await promise;
+
+    res = await userCtx.post("/bookings/reserve", {
+      headers: { "idempotency-key": crypto.randomUUID() },
+      data: { showId, seatIds: [seatId] },
+    });
+  }
+
+  return res;
 }
 
 test.describe("WBS 2.2: Concurrency Race Condition & Redis Redlock Testing", () => {
@@ -170,15 +188,11 @@ test.describe("WBS 2.2: Concurrency Race Condition & Redis Redlock Testing", () 
     expect(expiresAt - now).toBeLessThanOrEqual(tenMinutesInMs + 30000);
 
     // 3. User 2 cố tình đặt lại cùng ghế khi đang trong thời hạn khóa -> Phải nhận 409 Conflict
-    const reserveRes2 = await user2Ctx.post("/bookings/reserve", {
-      headers: {
-        "idempotency-key": crypto.randomUUID(),
-      },
-      data: {
-        showId: targetShowId,
-        seatIds: [reservation!.seatId],
-      },
-    });
+    const reserveRes2 = await sendReservationWith429Retry(
+      user2Ctx,
+      targetShowId,
+      reservation!.seatId,
+    );
 
     expect(reserveRes2.status()).toBe(409);
     const errorBody = await reserveRes2.json();
